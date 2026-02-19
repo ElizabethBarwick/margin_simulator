@@ -77,7 +77,7 @@ with col_right:
     sns.heatmap(
         total_profit_matrix,
         annot=True,
-        fmt="$,.0f",
+        fmt=".0f",
         cmap="RdYlGn",
         xticklabels=[f"{x:.0%}" for x in rebate_range],
         yticklabels=[f"{x:.0%}" for x in discount_range],
