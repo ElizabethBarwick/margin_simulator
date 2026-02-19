@@ -4,77 +4,71 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Pricing & Margin Explorer", layout="wide")
+st.set_page_config(page_title="Volume Strategy Planner", layout="wide")
 
-st.title("📊 Pricing & Margin Strategy Tool")
+st.title("📈 Volume Requirement Explorer")
+st.write("Calculate the volume needed to hit your margin goals across different price and discount points.")
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("Unit Economics")
-price_unit = st.sidebar.number_input("Base Price/Unit ($)", value=100.0, step=1.0)
-cogs_unit = st.sidebar.number_input("COGS/Unit ($)", value=60.0, step=1.0)
+# --- SIDEBAR: FIXED TARGETS ---
+st.sidebar.header("Fixed Targets")
+cogs_unit = st.sidebar.number_input("COGS per Unit ($)", value=60.0, step=1.0)
+target_profit_goal = st.sidebar.number_input("Total Gross Profit Goal ($)", value=50000, step=5000)
 
-st.sidebar.header("Discount Structure")
-on_inv_pct = st.sidebar.slider("On-Invoice Discount (%)", 0.0, 50.0, 10.0) / 100
-after_inv_pct = st.sidebar.slider("After-Invoice (Rebate) (%)", 0.0, 50.0, 5.0) / 100
+st.sidebar.header("Variable Ranges (for Heatmap)")
+min_price = st.sidebar.number_input("Min Base Price ($)", value=80.0)
+max_price = st.sidebar.number_input("Max Base Price ($)", value=150.0)
+max_discount = st.sidebar.slider("Max Total Discount %", 0, 50, 30) / 100
 
-st.sidebar.header("Target Goals")
-target_gm = st.sidebar.slider("Desired Gross Margin %", 10, 80, 30) / 100
+# --- DATA GENERATION ---
+# Create 10 steps for Price and 10 steps for Discount
+prices = np.linspace(min_price, max_price, 10)
+discounts = np.linspace(0, max_discount, 10)
 
-# --- CALCULATIONS ---
-net_price = price_unit * (1 - on_inv_pct)
-dead_net_price = net_price * (1 - after_inv_pct)
-current_gm_dollars = dead_net_price - cogs_unit
-current_gm_pct = current_gm_dollars / dead_net_price if dead_net_price > 0 else 0
+# Calculate Volume Matrix
+volume_matrix = np.zeros((len(discounts), len(prices)))
 
-# --- METRICS DISPLAY ---
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Net Price (On-Inv)", f"${net_price:.2f}")
-col2.metric("Dead Net Price", f"${dead_net_price:.2f}")
-col3.metric("Current GM %", f"{current_gm_pct:.1%}")
-col4.metric("GM $ / Unit", f"${current_gm_dollars:.2f}")
+for i, d in enumerate(discounts):
+    for j, p in enumerate(prices):
+        net_price = p * (1 - d)
+        margin_per_unit = net_price - cogs_unit
+        
+        if margin_per_unit > 0:
+            volume_matrix[i, j] = target_profit_goal / margin_per_unit
+        else:
+            volume_matrix[i, j] = np.nan # Mark as unprofitable
 
-# --- REQUIRED VOLUME CALCULATION ---
-st.divider()
-st.subheader("Volume Requirements")
-target_profit = st.number_input("Enter Total Target Gross Profit ($)", value=10000, step=1000)
+# Convert to DataFrame for easier plotting
+df_heatmap = pd.DataFrame(
+    volume_matrix, 
+    index=[f"{d:.0%}" for d in discounts], 
+    columns=[f"${p:.2f}" for p in prices]
+)
 
-if current_gm_dollars > 0:
-    req_vol = target_profit / current_gm_dollars
-    st.info(f"To achieve **${target_profit:,}** in profit at a **{current_gm_pct:.1%}** margin, you must sell **{int(req_vol):,}** units.")
-else:
-    st.error("Current pricing is below COGS. Increase price or reduce discounts to calculate volume.")
+# --- VISUALIZATION ---
+st.subheader(f"Heatmap: Units Needed to Net ${target_profit_goal:,} Profit")
+st.caption("Grey cells indicate the 'Dead Zone' where price is below COGS.")
 
-# --- HEATMAP ANALYSIS ---
-st.divider()
-st.subheader("Sensitivity Analysis: Total Discount % vs. Volume")
-st.write("This heatmap shows how **Gross Margin %** changes as you vary Total Discount and Volume.")
-
-# Create ranges for the heatmap
-discount_range = np.linspace(0, 0.4, 10) # 0% to 40% total discount
-volume_range = np.linspace(int(req_vol*0.5), int(req_vol*1.5), 10) if current_gm_dollars > 0 else np.linspace(100, 1000, 10)
-
-# Generate Matrix
-heatmap_data = []
-for d in discount_range:
-    row = []
-    for v in volume_range:
-        # Simplified: Price * (1 - Total Discount) - COGS
-        temp_dead_net = price_unit * (1 - d)
-        temp_gm = (temp_dead_net - cogs_unit) / temp_dead_net if temp_dead_net > 0 else 0
-        row.append(temp_gm)
-    heatmap_data.append(row)
-
-# Plotting
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=(12, 7))
 sns.heatmap(
-    heatmap_data, 
+    df_heatmap, 
     annot=True, 
-    fmt=".1%", 
-    xticklabels=[f"{int(x)}" for x in volume_range],
-    yticklabels=[f"{x:.0%}" for x in discount_range],
-    cmap="RdYlGn",
+    fmt=",.0f", # Format as whole numbers with commas
+    cmap="YlOrRd_r", # Reverse YlOrRd so lower volume (better) is greener/lighter
+    cbar_kws={'label': 'Units Required'},
+    mask=df_heatmap.isnull(),
     ax=ax
 )
-plt.xlabel("Volume (Units)")
-plt.ylabel("Total Discount % (Combined)")
+plt.xlabel("Base Price ($)")
+plt.ylabel("Total Discount (%)")
 st.pyplot(fig)
+
+# --- KEY INSIGHTS ---
+st.divider()
+best_case = np.nanmin(volume_matrix)
+worst_case = np.nanmax(volume_matrix)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.success(f"**Best Case Scenario:** Sell **{int(best_case):,} units** (High Price / Low Discount)")
+with col2:
+    st.warning(f"**Worst Case Scenario:** Sell **{int(worst_case):,} units** (Low Price / High Discount)")
