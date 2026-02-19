@@ -4,87 +4,69 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Discount & Rebate Impact", layout="wide")
+st.set_page_config(page_title="Pricing Strategy Matrix", layout="wide")
 
-st.title("📉 Discount vs. Rebate Margin Explorer")
-st.write("Analyze how layering on-invoice discounts and after-invoice rebates impacts your final Gross Margin.")
+st.title("📊 Pricing & Margin Explorer")
 
-# --- SIDEBAR: FIXED INPUTS ---
-st.sidebar.header("Fixed Unit Economics")
-base_price = st.sidebar.number_input("Base List Price ($)", value=100.0, step=1.0)
-cogs_unit = st.sidebar.number_input("COGS per Unit ($)", value=60.0, step=1.0)
-volume_input = st.sidebar.number_input("Projected Volume (Units)", value=1000, step=100)
+# --- SIDEBAR ---
+st.sidebar.header("Fixed Costs & Goals")
+base_price = st.sidebar.number_input("Base List Price ($)", value=100.0)
+cogs_unit = st.sidebar.number_input("COGS per Unit ($)", value=60.0)
+target_profit_goal = st.sidebar.number_input("Total Margin Goal ($)", value=100000, step=10000)
 
-st.sidebar.header("Analysis Ranges")
-max_disc = st.sidebar.slider("Max On-Invoice Discount %", 0, 50, 30) / 100
-max_rebate = st.sidebar.slider("Max After-Invoice Rebate %", 0, 50, 30) / 100
+st.sidebar.header("Variable Ranges")
+max_disc = st.sidebar.slider("Max On-Invoice Discount %", 0, 50, 25) / 100
+max_rebate = st.sidebar.slider("Max After-Invoice Rebate %", 0, 50, 25) / 100
 
 # --- CALCULATIONS ---
-# 1. Create ranges for the axes
-discount_range = np.linspace(0, max_disc, 10)
-rebate_range = np.linspace(0, max_rebate, 10)
+discounts = np.linspace(0, max_disc, 10)
+rebates = np.linspace(0, max_rebate, 10)
 
-# 2. Initialize Matrices
-margin_pct_matrix = np.zeros((len(discount_range), len(rebate_range)))
-total_profit_matrix = np.zeros((len(discount_range), len(rebate_range)))
+margin_pct_matrix = np.zeros((10, 10))
+profit_dollars_matrix = np.zeros((10, 10))
 
-for i, d in enumerate(discount_range):
-    for j, r in enumerate(rebate_range):
-        # Calculation Logic:
-        # Step 1: Apply On-Invoice Discount
+# Arbitrary volume for the "Total Margin $" view 
+# (You could also make this a slider)
+volume_input = 5000 
+
+for i, d in enumerate(discounts):
+    for j, r in enumerate(rebates):
         net_price = base_price * (1 - d)
-        # Step 2: Apply After-Invoice Rebate (usually calculated off Net)
-        dead_net_price = net_price * (1 - r)
+        dead_net = net_price * (1 - r)
+        unit_margin = dead_net - cogs_unit
         
-        # Step 3: Margin Math
-        margin_dollars = dead_net_price - cogs_unit
-        margin_pct = margin_dollars / dead_net_price if dead_net_price > 0 else 0
-        
-        margin_pct_matrix[i, j] = margin_pct
-        total_profit_matrix[i, j] = margin_dollars * volume_input
+        margin_pct_matrix[i, j] = unit_margin / dead_net if dead_net > 0 else 0
+        profit_dollars_matrix[i, j] = (unit_margin * volume_input) / 1000 # Scaling to thousands
 
-# --- UI LAYOUT ---
-# Metric Cards
-current_net = base_price - cogs_unit
-st.divider()
-c1, c2, c3 = st.columns(3)
-c1.metric("Max Possible Margin %", f"{(current_net/base_price):.1%}")
-c2.metric("Breakeven Price (Dead Net)", f"${cogs_unit:.2f}")
-c3.metric("Current COGS", f"${cogs_unit:.2f}")
+# --- VISUALS ---
+col1, col2 = st.columns(2)
 
-# --- HEATMAPS ---
-col_left, col_right = st.columns(2)
-
-with col_left:
-    st.subheader("Impact on Gross Margin %")
-    fig1, ax1 = plt.subplots(figsize=(10, 8))
-    sns.heatmap(
-        margin_pct_matrix,
-        annot=True,
-        fmt=".1%",
-        cmap="RdYlGn",
-        xticklabels=[f"{x:.0%}" for x in rebate_range],
-        yticklabels=[f"{x:.0%}" for x in discount_range],
-        ax=ax1
-    )
-    plt.xlabel("After-Invoice Rebate %")
-    plt.ylabel("On-Invoice Discount %")
+with col1:
+    st.subheader("Gross Margin %")
+    fig1, ax1 = plt.subplots()
+    sns.heatmap(margin_pct_matrix, annot=True, fmt=".1%", cmap="RdYlGn",
+                xticklabels=[f"{x:.0%}" for x in rebates],
+                yticklabels=[f"{x:.0%}" for x in discounts], ax=ax1)
+    ax1.set_xlabel("Rebate %")
+    ax1.set_ylabel("Discount %")
     st.pyplot(fig1)
 
-with col_right:
-    st.subheader(f"Impact on Total Margin $ (at {volume_input:,} units)")
-    fig2, ax2 = plt.subplots(figsize=(10, 8))
-    sns.heatmap(
-        total_profit_matrix,
-        annot=True,
-        fmt=".0f",
-        cmap="RdYlGn",
-        xticklabels=[f"{x:.0%}" for x in rebate_range],
-        yticklabels=[f"{x:.0%}" for x in discount_range],
-        ax=ax2
-    )
-    plt.xlabel("After-Invoice Rebate %")
-    plt.ylabel("On-Invoice Discount %")
+with col2:
+    st.subheader(f"Total Margin $ (in '000s) @ {volume_input:,} units")
+    fig2, ax2 = plt.subplots()
+    
+    # Custom annotation: adding 'k' suffix manually for clarity
+    annot_labels = np.array([[f"{val:.1f}k" for val in row] for row in profit_dollars_matrix])
+    
+    sns.heatmap(profit_dollars_matrix, 
+                annot=annot_labels, 
+                fmt="", # Must be empty when using custom annot labels
+                cmap="RdYlGn",
+                xticklabels=[f"{x:.0%}" for x in rebates],
+                yticklabels=[f"{x:.0%}" for x in discounts], 
+                ax=ax2)
+    ax2.set_xlabel("Rebate %")
+    ax2.set_ylabel("Discount %")
     st.pyplot(fig2)
 
-st.info("**Analysis Tip:** On-invoice discounts reduce the 'top line' immediately, while rebates are often paid later. This tool shows the combined 'Dead Net' effect on your bottom line.")
+st.caption("Values in the right chart represent thousands of dollars (e.g., 50.0k = $50,000).")
