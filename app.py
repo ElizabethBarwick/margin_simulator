@@ -4,77 +4,87 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Pricing Strategy Matrix", layout="wide")
+st.set_page_config(page_title="Discount & Rebate Impact", layout="wide")
 
-st.title("🎯 Strategic Pricing & Volume Mapper")
-st.write("Determine the **Base Price** and **Volume** required to hit your specific Margin targets.")
+st.title("📉 Discount vs. Rebate Margin Explorer")
+st.write("Analyze how layering on-invoice discounts and after-invoice rebates impacts your final Gross Margin.")
 
-# --- INPUTS ---
-col_a, col_b = st.columns(2)
+# --- SIDEBAR: FIXED INPUTS ---
+st.sidebar.header("Fixed Unit Economics")
+base_price = st.sidebar.number_input("Base List Price ($)", value=100.0, step=1.0)
+cogs_unit = st.sidebar.number_input("COGS per Unit ($)", value=60.0, step=1.0)
+volume_input = st.sidebar.number_input("Projected Volume (Units)", value=1000, step=100)
 
-with col_a:
-    st.header("Financial Targets")
-    target_profit_dollars = st.number_input("Total Margin Dollars Needed ($)", value=50000, step=5000)
-    target_margin_pct = st.slider("Desired Gross Margin %", 5, 75, 25) / 100
-    cogs_unit = st.number_input("COGS per Unit ($)", value=60.0, step=1.0)
-
-with col_b:
-    st.header("Discount Variables")
-    st.info("The heatmap will show how your **Base (List) Price** must change to accommodate these discounts while maintaining your target margin.")
-    max_discount = st.slider("Max Total Discount % to Model", 0, 60, 40) / 100
+st.sidebar.header("Analysis Ranges")
+max_disc = st.sidebar.slider("Max On-Invoice Discount %", 0, 50, 30) / 100
+max_rebate = st.sidebar.slider("Max After-Invoice Rebate %", 0, 50, 30) / 100
 
 # --- CALCULATIONS ---
-# 1. Calculate the Fixed Net Price required to hit the Margin %
-# Formula: Net = COGS / (1 - Margin%)
-req_net_price = cogs_unit / (1 - target_margin_pct)
-margin_per_unit = req_net_price - cogs_unit
-req_volume = target_profit_dollars / margin_per_unit
+# 1. Create ranges for the axes
+discount_range = np.linspace(0, max_disc, 10)
+rebate_range = np.linspace(0, max_rebate, 10)
 
-# --- DATA GENERATION FOR HEATMAP ---
-# We vary Total Discount and see what the BASE PRICE needs to be
-discounts = np.linspace(0, max_discount, 10)
-# We can also vary the Profit Goal to see how Volume scales
-profit_goals = np.linspace(target_profit_dollars * 0.5, target_profit_dollars * 1.5, 10)
+# 2. Initialize Matrices
+margin_pct_matrix = np.zeros((len(discount_range), len(rebate_range)))
+total_profit_matrix = np.zeros((len(discount_range), len(rebate_range)))
 
-price_matrix = np.zeros((len(discounts), len(profit_goals)))
+for i, d in enumerate(discount_range):
+    for j, r in enumerate(rebate_range):
+        # Calculation Logic:
+        # Step 1: Apply On-Invoice Discount
+        net_price = base_price * (1 - d)
+        # Step 2: Apply After-Invoice Rebate (usually calculated off Net)
+        dead_net_price = net_price * (1 - r)
+        
+        # Step 3: Margin Math
+        margin_dollars = dead_net_price - cogs_unit
+        margin_pct = margin_dollars / dead_net_price if dead_net_price > 0 else 0
+        
+        margin_pct_matrix[i, j] = margin_pct
+        total_profit_matrix[i, j] = margin_dollars * volume_input
 
-for i, d in enumerate(discounts):
-    for j, g in enumerate(profit_goals):
-        # Base Price needed to reach req_net_price after discount d
-        # Formula: Base = Net / (1 - d)
-        if d < 1:
-            price_matrix[i, j] = req_net_price / (1 - d)
-        else:
-            price_matrix[i, j] = np.nan
-
-df_heatmap = pd.DataFrame(
-    price_matrix,
-    index=[f"{d:.0%}" for d in discounts],
-    columns=[f"${g/1000:.0f}k" for g in profit_goals]
-)
-
-# --- DISPLAY METRICS ---
+# --- UI LAYOUT ---
+# Metric Cards
+current_net = base_price - cogs_unit
 st.divider()
-m1, m2, m3 = st.columns(3)
-m1.metric("Required Net Price", f"${req_net_price:.2f}")
-m2.metric("Required Volume (Units)", f"{int(req_volume):,}")
-m3.metric("Profit per Unit", f"${margin_per_unit:.2f}")
+c1, c2, c3 = st.columns(3)
+c1.metric("Max Possible Margin %", f"{(current_net/base_price):.1%}")
+c2.metric("Breakeven Price (Dead Net)", f"${cogs_unit:.2f}")
+c3.metric("Current COGS", f"${cogs_unit:.2f}")
 
-# --- HEATMAP ---
-st.subheader("Required Base Price vs. Profit Goal")
-st.write(f"To maintain a **{target_margin_pct:.0%} margin**, find your required **Base Price** based on discount depth and profit goals:")
+# --- HEATMAPS ---
+col_left, col_right = st.columns(2)
 
-fig, ax = plt.subplots(figsize=(12, 6))
-sns.heatmap(
-    df_heatmap, 
-    annot=True, 
-    fmt=".2f", 
-    cmap="YlGnBu", 
-    cbar_kws={'label': 'Required Base Price ($)'},
-    ax=ax
-)
-plt.xlabel("Total Profit Goal ($)")
-plt.ylabel("Total Discount % Offered")
-st.pyplot(fig)
+with col_left:
+    st.subheader("Impact on Gross Margin %")
+    fig1, ax1 = plt.subplots(figsize=(10, 8))
+    sns.heatmap(
+        margin_pct_matrix,
+        annot=True,
+        fmt=".1%",
+        cmap="RdYlGn",
+        xticklabels=[f"{x:.0%}" for x in rebate_range],
+        yticklabels=[f"{x:.0%}" for x in discount_range],
+        ax=ax1
+    )
+    plt.xlabel("After-Invoice Rebate %")
+    plt.ylabel("On-Invoice Discount %")
+    st.pyplot(fig1)
 
-st.caption("Note: Since Margin % is fixed by your input, the Volume Required remains constant for a specific Profit Goal, but the Base Price must increase as you offer deeper discounts.")
+with col_right:
+    st.subheader(f"Impact on Total Margin $ (at {volume_input:,} units)")
+    fig2, ax2 = plt.subplots(figsize=(10, 8))
+    sns.heatmap(
+        total_profit_matrix,
+        annot=True,
+        fmt="$,.0f",
+        cmap="RdYlGn",
+        xticklabels=[f"{x:.0%}" for x in rebate_range],
+        yticklabels=[f"{x:.0%}" for x in discount_range],
+        ax=ax2
+    )
+    plt.xlabel("After-Invoice Rebate %")
+    plt.ylabel("On-Invoice Discount %")
+    st.pyplot(fig2)
+
+st.info("**Analysis Tip:** On-invoice discounts reduce the 'top line' immediately, while rebates are often paid later. This tool shows the combined 'Dead Net' effect on your bottom line.")
